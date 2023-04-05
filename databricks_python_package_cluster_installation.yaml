@@ -1,0 +1,44 @@
+name: Databricks Cluster Python Package Installation
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+          cache: "pip"
+          # assumes the project uses setup.py
+          # see https://github.com/actions/setup-python/blob/main/docs/advanced-usage.md#caching-packages
+          # for alternatives
+          cache-dependency-path: setup.py
+      - name: Build wheel
+        run: |
+          pip install wheel
+          python setup.py bdist_wheel
+          echo "WHEEL_NAME=$(basename "$(ls dist/*.whl)")" >> $GITHUB_ENV
+      - name: Install Databricks CLI
+        run: python -m pip install --upgrade databricks-cli
+      - name: Copy wheel to DBFS
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        working-directory: dist
+        run: databricks fs cp "${WHEEL_NAME}" "dbfs:/libraries/${WHEEL_NAME}" --overwrite
+      - name: Install wheel on cluster
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks libraries install --cluster-id ${{ secrets.DATABRICKS_CLUSTER_ID }} --whl "dbfs:/libraries/${WHEEL_NAME}"
+      - name: Update databricks repo
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks repos update --repo-id ${{ secrets.DATABRICKS_REPO_ID }} --branch main
